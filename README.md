@@ -940,35 +940,6 @@ The routing engine used by this gateway is maintained as a separate Python/FastA
 
 This gateway integrates HyperRouter as a sidecar rather than making it responsible for the final provider call.
 
----
-
-## Screenshots
-
-Suggested repository layout:
-
-```text
-docs/
-└── screenshots/
-    ├── dashboard.png
-    ├── models.png
-    ├── routing-rules.png
-    ├── api-keys.png
-    └── logs.png
-```
-
-Embed them in this README when committed:
-
-```md
-![Models](docs/screenshots/models.png)
-
-![Routing Rules](docs/screenshots/routing-rules.png)
-```
-
----
-
-## Resume Summary
-
-> Built an OpenAI-compatible LLM gateway with PostgreSQL-backed runtime model registration, ML-assisted cost/quality routing, semantic caching, encrypted provider credentials, generic OpenAI-compatible provider execution, and a React-based admin control plane.
 
 ---
 
