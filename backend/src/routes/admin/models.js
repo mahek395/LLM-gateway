@@ -8,9 +8,85 @@ const HYPER_ROUTER_URL =
 
 export const modelsAdminRouter = express.Router();
 
+function validateModelInput({
+    modelId,
+    providerModelId,
+    baseUrl,
+    inputCostPerM,
+    outputCostPerM,
+    capabilityScore,
+    contextWindow,
+    maxOutputTokens,
+    avgLatencyMs,
+}) {
+    if (!modelId) {
+        return "modelId is required";
+    }
+
+    if (!providerModelId) {
+        return "providerModelId is required";
+    }
+
+    if (!baseUrl) {
+        return "baseUrl is required";
+    }
+
+    if (
+        inputCostPerM != null &&
+        (!Number.isFinite(Number(inputCostPerM)) ||
+            Number(inputCostPerM) < 0)
+    ) {
+        return "inputCostPerM must be a non-negative number";
+    }
+
+    if (
+        outputCostPerM != null &&
+        (!Number.isFinite(Number(outputCostPerM)) ||
+            Number(outputCostPerM) < 0)
+    ) {
+        return "outputCostPerM must be a non-negative number";
+    }
+
+    if (
+        capabilityScore != null &&
+        (!Number.isFinite(Number(capabilityScore)) ||
+            Number(capabilityScore) < 0 ||
+            Number(capabilityScore) > 1)
+    ) {
+        return "capabilityScore must be between 0 and 1";
+    }
+
+    if (
+        contextWindow != null &&
+        (!Number.isInteger(Number(contextWindow)) ||
+            Number(contextWindow) <= 0)
+    ) {
+        return "contextWindow must be a positive integer";
+    }
+
+    if (
+        maxOutputTokens != null &&
+        (!Number.isInteger(Number(maxOutputTokens)) ||
+            Number(maxOutputTokens) <= 0)
+    ) {
+        return "maxOutputTokens must be a positive integer";
+    }
+
+    if (
+        avgLatencyMs != null &&
+        (!Number.isFinite(Number(avgLatencyMs)) ||
+            Number(avgLatencyMs) < 0)
+    ) {
+        return "avgLatencyMs must be non-negative";
+    }
+
+    return null;
+}
+
 // ------------------------------------------------------------------
-// Register / update model
+// Create / update model
 // ------------------------------------------------------------------
+
 modelsAdminRouter.post(
     "/admin/models",
     requireAdminAuth,
@@ -32,36 +108,44 @@ modelsAdminRouter.post(
                 description,
             } = req.body;
 
-            // ------------------------------------------------------------
-            // Required fields
-            // ------------------------------------------------------------
-            if (!modelId) {
+            const validationError = validateModelInput({
+                modelId,
+                providerModelId,
+                baseUrl,
+                inputCostPerM,
+                outputCostPerM,
+                capabilityScore,
+                contextWindow,
+                maxOutputTokens,
+                avgLatencyMs,
+            });
+
+            if (validationError) {
                 return res.status(400).json({
-                    error: "modelId is required",
+                    error: "invalid_model",
+                    detail: validationError,
                 });
             }
 
-            if (!providerModelId) {
+            const existing = await pool.query(
+                `SELECT model_id, api_key_encrypted
+         FROM registered_models
+         WHERE model_id = $1`,
+                [modelId]
+            );
+
+            const existingRow = existing.rows[0];
+
+            if (!existingRow && !apiKey) {
                 return res.status(400).json({
-                    error: "providerModelId is required",
+                    error: "apiKey is required when registering a new model",
                 });
             }
 
-            if (!baseUrl) {
-                return res.status(400).json({
-                    error: "baseUrl is required",
-                });
-            }
+            const encryptedApiKey = apiKey
+                ? encryptSecret(apiKey)
+                : existingRow.api_key_encrypted;
 
-            if (!apiKey) {
-                return res.status(400).json({
-                    error: "apiKey is required",
-                });
-            }
-
-            // ------------------------------------------------------------
-            // Insert / update
-            // ------------------------------------------------------------
             await pool.query(
                 `INSERT INTO registered_models
         (
@@ -81,7 +165,8 @@ modelsAdminRouter.post(
         )
         VALUES
         (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13
         )
         ON CONFLICT (model_id)
         DO UPDATE SET
@@ -103,7 +188,7 @@ modelsAdminRouter.post(
                     providerModelId,
                     providerLabel ?? "",
                     baseUrl,
-                    encryptSecret(apiKey),
+                    encryptedApiKey,
                     inputCostPerM ?? 0,
                     outputCostPerM ?? 0,
                     capabilityScore ?? 0,
@@ -115,20 +200,18 @@ modelsAdminRouter.post(
                 ]
             );
 
-            // ------------------------------------------------------------
-            // Immediately refresh Python model registry
-            // ------------------------------------------------------------
             await triggerSidecarReload();
 
-            return res.status(201).json({
-                registered: modelId,
+            return res.status(existingRow ? 200 : 201).json({
+                saved: modelId,
                 providerModelId,
+                mode: existingRow ? "updated" : "created",
             });
         } catch (err) {
-            console.error("register model failed:", err);
+            console.error("save model failed:", err);
 
             return res.status(500).json({
-                error: "model_registration_failed",
+                error: "model_save_failed",
                 detail: err.message,
             });
         }
@@ -136,8 +219,9 @@ modelsAdminRouter.post(
 );
 
 // ------------------------------------------------------------------
-// Delete model
+// Delete
 // ------------------------------------------------------------------
+
 modelsAdminRouter.delete(
     "/admin/models/:modelId(*)",
     requireAdminAuth,
@@ -161,7 +245,7 @@ modelsAdminRouter.delete(
             await triggerSidecarReload();
 
             return res.json({
-                unregistered: modelId,
+                deleted: modelId,
             });
         } catch (err) {
             console.error("delete model failed:", err);
@@ -175,8 +259,9 @@ modelsAdminRouter.delete(
 );
 
 // ------------------------------------------------------------------
-// List models
+// List
 // ------------------------------------------------------------------
+
 modelsAdminRouter.get(
     "/admin/models",
     requireAdminAuth,
@@ -213,9 +298,6 @@ modelsAdminRouter.get(
     }
 );
 
-// ------------------------------------------------------------------
-// Trigger Python sidecar reload
-// ------------------------------------------------------------------
 async function triggerSidecarReload() {
     try {
         const response = await fetch(
@@ -232,7 +314,7 @@ async function triggerSidecarReload() {
         }
     } catch (err) {
         console.error(
-            "sidecar reload trigger failed (will self-correct within ~20s):",
+            "sidecar reload trigger failed:",
             err.message
         );
     }

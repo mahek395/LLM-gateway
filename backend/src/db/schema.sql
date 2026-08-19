@@ -58,17 +58,24 @@ CREATE TABLE IF NOT EXISTS api_keys (
 -- Live routing configuration. Single active row (id=1), read on every request
 -- via a short-TTL Redis cache. Editing this from the admin panel changes
 -- gateway behavior with no redeploy.
-CREATE TABLE IF NOT EXISTS routing_rules (
+CREATE TABLE routing_rules (
     id INTEGER PRIMARY KEY DEFAULT 1,
-    cheap_model_max_length INTEGER NOT NULL DEFAULT 400,
-    complexity_patterns JSONB NOT NULL DEFAULT '["step by step","explain why","compare","analyze","code","debug","write a function"]',
-    cheap_provider VARCHAR(50) NOT NULL DEFAULT 'groq',
-    cheap_model VARCHAR(100) NOT NULL DEFAULT 'llama-3.3-70b-versatile',
-    strong_provider VARCHAR(50) NOT NULL DEFAULT 'gemini',
-    strong_model VARCHAR(100) NOT NULL DEFAULT 'gemini-2.5-flash',
-    cache_similarity_threshold NUMERIC NOT NULL DEFAULT 0.95,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT single_row CHECK (id = 1)
+
+    routing_policy VARCHAR(50) NOT NULL DEFAULT 'balanced',
+
+    lambda_cost DOUBLE PRECISION NOT NULL DEFAULT 100.0,
+
+    cascade_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.60,
+
+    capability_margin DOUBLE PRECISION NOT NULL DEFAULT 0.08,
+
+    min_capability_floor DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+
+    enable_cascade_fallback BOOLEAN NOT NULL DEFAULT TRUE,
+
+    cache_similarity_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.95,
+
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 INSERT INTO routing_rules (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

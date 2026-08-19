@@ -23,13 +23,18 @@ export function useModels() {
     }, []);
 
     useEffect(() => {
-        refresh();
+        refresh().catch(() => { });
     }, [refresh]);
 
     async function createModel(model) {
-        const created = await api.post("/admin/models", model);
+        const result = await api.post(
+            "/admin/models",
+            model
+        );
+
         await refresh();
-        return created;
+
+        return result;
     }
 
     async function deleteModel(modelId) {

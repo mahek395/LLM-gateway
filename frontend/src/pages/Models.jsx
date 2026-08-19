@@ -17,22 +17,11 @@ const EMPTY_FORM = {
     description: "",
 };
 
-function formatFeatures(features) {
-    if (!Array.isArray(features) || features.length === 0) {
-        return "—";
-    }
-
-    return features.join(", ");
-}
-
 function formatCost(value) {
     const number = Number(value);
-
-    if (Number.isNaN(number)) {
-        return "—";
-    }
-
-    return `$${number}/M`;
+    return Number.isFinite(number)
+        ? `$${number}/M`
+        : "—";
 }
 
 export function Models() {
@@ -45,9 +34,51 @@ export function Models() {
     } = useModels();
 
     const [showForm, setShowForm] = useState(false);
+    const [editing, setEditing] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
     const [formError, setFormError] = useState(null);
+
+    function openCreate() {
+        setEditing(false);
+        setForm(EMPTY_FORM);
+        setFormError(null);
+        setShowForm(true);
+    }
+
+    function openEdit(model) {
+        setEditing(true);
+        setFormError(null);
+
+        setForm({
+            modelId: model.model_id,
+            providerModelId: model.provider_model_id ?? "",
+            providerLabel: model.provider_label ?? "",
+            baseUrl: model.base_url ?? "",
+            apiKey: "",
+            inputCostPerM: model.input_cost_per_m ?? "",
+            outputCostPerM: model.output_cost_per_m ?? "",
+            capabilityScore: model.capability_score ?? "",
+            contextWindow: model.context_window ?? 128000,
+            maxOutputTokens: model.max_output_tokens ?? 4096,
+            features: Array.isArray(model.features)
+                ? model.features.join(", ")
+                : "",
+            avgLatencyMs: model.avg_latency_ms ?? 600,
+            description: model.description ?? "",
+        });
+
+        setShowForm(true);
+    }
+
+    function closeForm() {
+        if (saving) return;
+
+        setShowForm(false);
+        setEditing(false);
+        setForm(EMPTY_FORM);
+        setFormError(null);
+    }
 
     function handleChange(event) {
         const { name, value } = event.target;
@@ -65,33 +96,60 @@ export function Models() {
         setFormError(null);
 
         try {
+            if (
+                Number(form.capabilityScore) < 0 ||
+                Number(form.capabilityScore) > 1
+            ) {
+                throw new Error(
+                    "Capability score must be between 0 and 1."
+                );
+            }
+
             const payload = {
                 modelId: form.modelId.trim(),
-                providerModelId: form.providerModelId.trim(),
-                providerLabel: form.providerLabel.trim(),
+                providerModelId:
+                    form.providerModelId.trim(),
+                providerLabel:
+                    form.providerLabel.trim(),
                 baseUrl: form.baseUrl.trim(),
-                apiKey: form.apiKey,
 
-                inputCostPerM: Number(form.inputCostPerM),
-                outputCostPerM: Number(form.outputCostPerM),
-                capabilityScore: Number(form.capabilityScore),
+                // Empty on edit means keep existing secret.
+                ...(form.apiKey.trim()
+                    ? { apiKey: form.apiKey.trim() }
+                    : {}),
 
-                contextWindow: Number(form.contextWindow),
-                maxOutputTokens: Number(form.maxOutputTokens),
+                inputCostPerM: Number(
+                    form.inputCostPerM
+                ),
+                outputCostPerM: Number(
+                    form.outputCostPerM
+                ),
+                capabilityScore: Number(
+                    form.capabilityScore
+                ),
+
+                contextWindow: Number(
+                    form.contextWindow
+                ),
+                maxOutputTokens: Number(
+                    form.maxOutputTokens
+                ),
 
                 features: form.features
                     .split(",")
                     .map((feature) => feature.trim())
                     .filter(Boolean),
 
-                avgLatencyMs: Number(form.avgLatencyMs),
+                avgLatencyMs: Number(
+                    form.avgLatencyMs
+                ),
+
                 description: form.description.trim(),
             };
 
             await createModel(payload);
 
-            setForm(EMPTY_FORM);
-            setShowForm(false);
+            closeForm();
         } catch (err) {
             setFormError(err);
         } finally {
@@ -101,18 +159,16 @@ export function Models() {
 
     async function handleDelete(model) {
         const confirmed = window.confirm(
-            `Delete registered model "${model.model_id}"?`
+            `Delete "${model.model_id}"?\n\nThis removes it from the routing pool.`
         );
 
-        if (!confirmed) {
-            return;
-        }
+        if (!confirmed) return;
 
         try {
             await deleteModel(model.model_id);
         } catch (err) {
             window.alert(
-                err?.message || "Failed to delete model"
+                err?.message || "Failed to delete model."
             );
         }
     }
@@ -127,31 +183,32 @@ export function Models() {
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-start justify-between mb-6">
                 <div>
                     <h1 className="text-2xl font-semibold">
                         Models
                     </h1>
 
                     <p className="text-sm text-gray-500 mt-1">
-                        Manage the models available to HyperRouter.
+                        Manage the models available to
+                        HyperRouter.
                     </p>
                 </div>
 
                 <button
-                    onClick={() => {
-                        setShowForm((value) => !value);
-                        setFormError(null);
-                    }}
+                    onClick={showForm ? closeForm : openCreate}
                     className="bg-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800"
                 >
-                    {showForm ? "Cancel" : "Register model"}
+                    {showForm
+                        ? "Close"
+                        : "Register model"}
                 </button>
             </div>
 
             {error && (
                 <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
-                    Failed to load models: {error.message}
+                    Failed to load models:{" "}
+                    {error.message}
                 </div>
             )}
 
@@ -160,9 +217,21 @@ export function Models() {
                     onSubmit={handleSubmit}
                     className="bg-white border border-gray-200 rounded-lg p-6 mb-6"
                 >
-                    <h2 className="text-lg font-medium mb-5">
-                        Register model
-                    </h2>
+                    <div className="flex items-center justify-between mb-5">
+                        <div>
+                            <h2 className="text-lg font-semibold">
+                                {editing
+                                    ? "Edit model"
+                                    : "Register model"}
+                            </h2>
+
+                            <p className="text-xs text-gray-500 mt-1">
+                                {editing
+                                    ? "Leave API key empty to keep the existing key."
+                                    : "Provider credentials are encrypted before storage."}
+                            </p>
+                        </div>
+                    </div>
 
                     {formError && (
                         <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
@@ -170,7 +239,7 @@ export function Models() {
                         </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field
                             label="Model ID"
                             name="modelId"
@@ -178,6 +247,7 @@ export function Models() {
                             onChange={handleChange}
                             placeholder="groq/openai-gpt-oss-20b"
                             required
+                            disabled={editing}
                         />
 
                         <Field
@@ -190,7 +260,7 @@ export function Models() {
                         />
 
                         <Field
-                            label="Provider Label"
+                            label="Provider"
                             name="providerLabel"
                             value={form.providerLabel}
                             onChange={handleChange}
@@ -207,41 +277,47 @@ export function Models() {
                         />
 
                         <Field
-                            label="Provider API Key"
+                            label={
+                                editing
+                                    ? "Provider API Key (optional)"
+                                    : "Provider API Key"
+                            }
                             name="apiKey"
                             type="password"
                             value={form.apiKey}
                             onChange={handleChange}
-                            placeholder="Provider secret"
-                            required
+                            placeholder={
+                                editing
+                                    ? "Leave blank to keep current key"
+                                    : "Provider secret"
+                            }
+                            required={!editing}
                         />
 
                         <Field
-                            label="Input Cost / 1M"
+                            label="Input cost / 1M"
                             name="inputCostPerM"
                             type="number"
                             step="0.000001"
                             min="0"
                             value={form.inputCostPerM}
                             onChange={handleChange}
-                            placeholder="0.05"
                             required
                         />
 
                         <Field
-                            label="Output Cost / 1M"
+                            label="Output cost / 1M"
                             name="outputCostPerM"
                             type="number"
                             step="0.000001"
                             min="0"
                             value={form.outputCostPerM}
                             onChange={handleChange}
-                            placeholder="0.08"
                             required
                         />
 
                         <Field
-                            label="Capability Score"
+                            label="Capability score"
                             name="capabilityScore"
                             type="number"
                             step="0.01"
@@ -249,12 +325,11 @@ export function Models() {
                             max="1"
                             value={form.capabilityScore}
                             onChange={handleChange}
-                            placeholder="0.55"
                             required
                         />
 
                         <Field
-                            label="Context Window"
+                            label="Context window"
                             name="contextWindow"
                             type="number"
                             min="1"
@@ -264,7 +339,7 @@ export function Models() {
                         />
 
                         <Field
-                            label="Max Output Tokens"
+                            label="Max output tokens"
                             name="maxOutputTokens"
                             type="number"
                             min="1"
@@ -274,7 +349,7 @@ export function Models() {
                         />
 
                         <Field
-                            label="Average Latency (ms)"
+                            label="Average latency (ms)"
                             name="avgLatencyMs"
                             type="number"
                             min="0"
@@ -303,18 +378,31 @@ export function Models() {
                             value={form.description}
                             onChange={handleChange}
                             rows={3}
-                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                            placeholder="Short description of this model"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                            placeholder="Short description"
                         />
                     </div>
 
-                    <div className="flex justify-end mt-5">
+                    <div className="flex justify-end gap-3 mt-5">
+                        <button
+                            type="button"
+                            onClick={closeForm}
+                            disabled={saving}
+                            className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
+                        >
+                            Cancel
+                        </button>
+
                         <button
                             type="submit"
                             disabled={saving}
-                            className="bg-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+                            className="bg-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
                         >
-                            {saving ? "Registering..." : "Register model"}
+                            {saving
+                                ? "Saving..."
+                                : editing
+                                    ? "Save changes"
+                                    : "Register model"}
                         </button>
                     </div>
                 </form>
@@ -358,7 +446,7 @@ export function Models() {
                                 {models.map((model) => (
                                     <tr
                                         key={model.model_id}
-                                        className="border-b border-gray-100 last:border-0"
+                                        className="border-b border-gray-100 last:border-0 hover:bg-gray-50"
                                     >
                                         <td className="px-4 py-4 align-top">
                                             <div className="font-medium text-gray-900">
@@ -380,7 +468,9 @@ export function Models() {
                                         </td>
 
                                         <td className="px-4 py-4 align-top">
-                                            {Number(model.capability_score).toFixed(2)}
+                                            {Number(
+                                                model.capability_score
+                                            ).toFixed(2)}
                                         </td>
 
                                         <td className="px-4 py-4 align-top">
@@ -400,12 +490,9 @@ export function Models() {
                                         </td>
 
                                         <td className="px-4 py-4 align-top">
-                                            <div>
-                                                {Number(
-                                                    model.context_window
-                                                ).toLocaleString()}
-                                            </div>
-
+                                            {Number(
+                                                model.context_window
+                                            ).toLocaleString()}
                                             <div className="text-xs text-gray-400 mt-1">
                                                 max out:{" "}
                                                 {Number(
@@ -416,25 +503,41 @@ export function Models() {
 
                                         <td className="px-4 py-4 align-top">
                                             {Math.round(
-                                                Number(model.avg_latency_ms)
+                                                Number(
+                                                    model.avg_latency_ms
+                                                )
                                             )}
                                             ms
                                         </td>
 
                                         <td className="px-4 py-4 align-top">
-                                            <button
-                                                onClick={() =>
-                                                    handleDelete(model)
-                                                }
-                                                className="text-red-600 hover:underline"
-                                            >
-                                                Delete
-                                            </button>
+                                            <div className="flex gap-3">
+                                                <button
+                                                    onClick={() =>
+                                                        openEdit(model)
+                                                    }
+                                                    className="text-gray-700 hover:underline"
+                                                >
+                                                    Edit
+                                                </button>
 
-                                            <div className="text-xs text-gray-400 mt-2 max-w-40">
-                                                {formatFeatures(
+                                                <button
+                                                    onClick={() =>
+                                                        handleDelete(model)
+                                                    }
+                                                    className="text-red-600 hover:underline"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+
+                                            <div className="text-xs text-gray-400 mt-2 max-w-44">
+                                                {Array.isArray(
                                                     model.features
-                                                )}
+                                                ) &&
+                                                    model.features.length
+                                                    ? model.features.join(", ")
+                                                    : "No features"}
                                             </div>
                                         </td>
                                     </tr>
@@ -456,7 +559,7 @@ function Field({
     type = "text",
     placeholder,
     required = false,
-    ...props
+    disabled = false,
 }) {
     return (
         <div>
@@ -471,8 +574,11 @@ function Field({
                 onChange={onChange}
                 placeholder={placeholder}
                 required={required}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                {...props}
+                disabled={disabled}
+                className={`w-full border border-gray-300 rounded-md px-3 py-2 text-sm ${disabled
+                        ? "bg-gray-100 text-gray-500"
+                        : ""
+                    }`}
             />
         </div>
     );
